@@ -17,7 +17,32 @@ interface QuizQuestion {
     rubric?: string;
     keywords?: string[];
     minWords?: number;
+    // Image support
+    questionImage?: string; // base64 image for question
+    optionImages?: (string | null)[]; // base64 images for each option
 }
+
+// Predefined subjects (teachers can also add custom)
+const PREDEFINED_SUBJECTS = [
+    'Matematika',
+    'Bahasa Indonesia',
+    'Bahasa Inggris',
+    'IPA',
+    'IPS',
+    'Fisika',
+    'Kimia',
+    'Biologi',
+    'Ekonomi',
+    'Sejarah',
+    'Geografi',
+    'PKN',
+    'Seni Budaya',
+    'Farmasi',
+    'Keperawatan',
+];
+
+// Max file size 1MB
+const MAX_IMAGE_SIZE = 1 * 1024 * 1024;
 
 interface QuizDraft {
     id: string;
@@ -43,6 +68,13 @@ export default function TeacherContentPage() {
     const [isScanModalOpen, setIsScanModalOpen] = useState(false);
     const [scanImage, setScanImage] = useState<string | null>(null);
     const [isScanning, setIsScanning] = useState(false);
+    // AI Clarification preferences
+    const [scanStep, setScanStep] = useState<'upload' | 'preferences' | 'processing'>('upload');
+    const [scanPreferences, setScanPreferences] = useState({
+        questionType: 'mixed' as 'choice' | 'essay' | 'mixed',
+        difficulty: 'medium' as 'easy' | 'medium' | 'hard',
+        count: 5
+    });
 
     const [drafts, setDrafts] = useState<QuizDraft[]>([]);
     const [isCreating, setIsCreating] = useState(false);
@@ -106,42 +138,86 @@ export default function TeacherContentPage() {
         if (!scanImage) return;
 
         setIsScanning(true);
+        setScanStep('processing');
         try {
             const response = await fetch('/api/quiz-ocr', {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image: scanImage })
+                body: JSON.stringify({
+                    image: scanImage,
+                    preferences: scanPreferences
+                })
             });
 
-            if (!response.ok) throw new Error('Failed to scan');
-
             const data = await response.json();
+
+            if (!response.ok) {
+                throw new Error(data.message || 'Failed to scan');
+            }
+
+            if (!data.questions || data.questions.length === 0) {
+                alert(language === 'id'
+                    ? 'Tidak ada soal yang terdeteksi. Coba dengan gambar yang lebih jelas.'
+                    : 'No questions detected. Try with a clearer image.');
+                setScanStep('upload');
+                return;
+            }
 
             // Transform and add questions
             const newQuestions = data.questions.map((q: any) => ({
                 id: `q-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`,
-                question: q.question.id || q.question.en || q.question, // Handle various formats
+                question: typeof q.question === 'object' ? (q.question.id || q.question.en) : q.question,
                 type: q.type,
-                options: q.type === 'choice' ? (q.options || []) : undefined,
+                options: q.type === 'choice' ? (q.options || ['', '', '', '']) : undefined,
+                optionImages: q.type === 'choice' ? [null, null, null, null] : undefined,
                 correctAnswer: q.correctAnswer || '',
-                points: q.points || 10,
-                rubric: q.type === 'essay' ? '' : undefined, // Initialize rubric for essays
+                points: q.points || (q.type === 'essay' ? 20 : 10),
+                rubric: q.type === 'essay' ? '' : undefined,
                 keywords: [],
                 minWords: 50
             }));
+
+            // Set detected subject if available
+            if (data.metadata?.subject) {
+                setSubject(data.metadata.subject);
+            }
 
             // Append to existing questions
             setQuestions([...questions, ...newQuestions]);
             setIsScanModalOpen(false);
             setScanImage(null);
-            alert(language === 'id' ? 'Soal berhasil diekstrak!' : 'Questions extracted successfully!');
+            setScanStep('upload');
 
-        } catch (error) {
+            alert(language === 'id'
+                ? `${newQuestions.length} soal berhasil diekstrak dari ${data.metadata?.subject || 'materi'}!`
+                : `${newQuestions.length} questions extracted successfully!`);
+
+        } catch (error: any) {
             console.error('Scan failed:', error);
-            alert(language === 'id' ? 'Gagal memproses gambar.' : 'Failed to process image.');
+            alert(error.message || (language === 'id' ? 'Gagal memproses gambar.' : 'Failed to process image.'));
+            setScanStep('preferences');
         } finally {
             setIsScanning(false);
         }
+    };
+
+    // Handle image upload for questions/options
+    const handleImageUpload = (
+        file: File,
+        onSuccess: (base64: string) => void
+    ) => {
+        if (file.size > MAX_IMAGE_SIZE) {
+            alert(language === 'id'
+                ? 'Ukuran gambar maksimal 1MB!'
+                : 'Maximum image size is 1MB!');
+            return;
+        }
+
+        const reader = new FileReader();
+        reader.onloadend = () => {
+            onSuccess(reader.result as string);
+        };
+        reader.readAsDataURL(file);
     };
 
     // List View logic remains...
@@ -155,7 +231,7 @@ export default function TeacherContentPage() {
         };
 
         const newQuestion: QuizQuestion = type === 'choice'
-            ? { ...baseQuestion, options: ['', '', '', ''], correctAnswer: '' }
+            ? { ...baseQuestion, options: ['', '', '', ''], correctAnswer: '', optionImages: [null, null, null, null] }
             : { ...baseQuestion, rubric: '', keywords: [], minWords: 50 };
 
         setQuestions([...questions, newQuestion]);
@@ -285,17 +361,19 @@ export default function TeacherContentPage() {
                                     <label className="block text-sm font-semibold text-duo-gray-700 mb-1">
                                         {language === 'id' ? 'Mata Pelajaran' : 'Subject'}
                                     </label>
-                                    <select
+                                    <input
+                                        type="text"
+                                        list="subject-list"
                                         value={subject}
                                         onChange={(e) => setSubject(e.target.value)}
+                                        placeholder={language === 'id' ? 'Pilih atau ketik mata pelajaran' : 'Select or type subject'}
                                         className="input"
-                                    >
-                                        <option value="matematika">Matematika</option>
-                                        <option value="bahasa_indonesia">Bahasa Indonesia</option>
-                                        <option value="bahasa_inggris">Bahasa Inggris</option>
-                                        <option value="ipa">IPA</option>
-                                        <option value="ips">IPS</option>
-                                    </select>
+                                    />
+                                    <datalist id="subject-list">
+                                        {PREDEFINED_SUBJECTS.map(s => (
+                                            <option key={s} value={s} />
+                                        ))}
+                                    </datalist>
                                 </div>
 
                                 <div>
@@ -473,25 +551,112 @@ export default function TeacherContentPage() {
                                             rows={2}
                                         />
 
+                                        {/* Question Image Upload */}
+                                        <div className="mb-3">
+                                            {q.questionImage ? (
+                                                <div className="relative inline-block">
+                                                    <Image
+                                                        src={q.questionImage}
+                                                        alt="Question image"
+                                                        width={200}
+                                                        height={150}
+                                                        className="rounded-lg object-cover"
+                                                    />
+                                                    <button
+                                                        onClick={() => handleUpdateQuestion(qIndex, { questionImage: undefined })}
+                                                        className="absolute -top-2 -right-2 bg-duo-red text-white w-6 h-6 rounded-full text-xs flex items-center justify-center"
+                                                    >
+                                                        ✕
+                                                    </button>
+                                                </div>
+                                            ) : (
+                                                <label className="inline-flex items-center gap-2 px-3 py-2 bg-duo-gray-200 rounded-lg cursor-pointer hover:bg-duo-gray-300 text-sm">
+                                                    <span>🖼️</span>
+                                                    <span>{language === 'id' ? 'Tambah Gambar Soal' : 'Add Question Image'}</span>
+                                                    <input
+                                                        type="file"
+                                                        accept="image/*"
+                                                        className="hidden"
+                                                        onChange={(e) => {
+                                                            const file = e.target.files?.[0];
+                                                            if (file) {
+                                                                handleImageUpload(file, (base64) => {
+                                                                    handleUpdateQuestion(qIndex, { questionImage: base64 });
+                                                                });
+                                                            }
+                                                        }}
+                                                    />
+                                                </label>
+                                            )}
+                                            <span className="text-xs text-duo-gray-400 ml-2">(Max 1MB)</span>
+                                        </div>
+
                                         {/* Multiple Choice Options */}
                                         {q.type === 'choice' && (
-                                            <div className="grid grid-cols-2 gap-2 mb-3">
+                                            <div className="grid grid-cols-2 gap-3 mb-3">
                                                 {q.options?.map((opt, oIndex) => (
-                                                    <div key={oIndex} className="flex items-center gap-2">
-                                                        <input
-                                                            type="radio"
-                                                            name={`correct-${q.id}`}
-                                                            checked={q.correctAnswer === opt && opt !== ''}
-                                                            onChange={() => handleUpdateQuestion(qIndex, { correctAnswer: opt })}
-                                                            className="w-4 h-4"
-                                                        />
-                                                        <input
-                                                            type="text"
-                                                            value={opt}
-                                                            onChange={(e) => handleUpdateOption(qIndex, oIndex, e.target.value)}
-                                                            placeholder={`${language === 'id' ? 'Pilihan' : 'Option'} ${String.fromCharCode(65 + oIndex)}`}
-                                                            className="flex-1 px-3 py-2 border-2 border-duo-gray-200 rounded-lg text-sm"
-                                                        />
+                                                    <div key={oIndex} className="bg-white p-3 rounded-lg border-2 border-duo-gray-200">
+                                                        <div className="flex items-center gap-2 mb-2">
+                                                            <input
+                                                                type="radio"
+                                                                name={`correct-${q.id}`}
+                                                                checked={q.correctAnswer === opt && opt !== ''}
+                                                                onChange={() => handleUpdateQuestion(qIndex, { correctAnswer: opt })}
+                                                                className="w-4 h-4"
+                                                            />
+                                                            <span className="text-xs font-bold text-duo-gray-500">
+                                                                {String.fromCharCode(65 + oIndex)}
+                                                            </span>
+                                                            <input
+                                                                type="text"
+                                                                value={opt}
+                                                                onChange={(e) => handleUpdateOption(qIndex, oIndex, e.target.value)}
+                                                                placeholder={`${language === 'id' ? 'Pilihan' : 'Option'} ${String.fromCharCode(65 + oIndex)}`}
+                                                                className="flex-1 px-2 py-1 border-2 border-duo-gray-200 rounded-lg text-sm"
+                                                            />
+                                                        </div>
+                                                        {/* Option Image */}
+                                                        {q.optionImages?.[oIndex] ? (
+                                                            <div className="relative inline-block mt-2">
+                                                                <Image
+                                                                    src={q.optionImages[oIndex]!}
+                                                                    alt={`Option ${String.fromCharCode(65 + oIndex)}`}
+                                                                    width={100}
+                                                                    height={75}
+                                                                    className="rounded object-cover"
+                                                                />
+                                                                <button
+                                                                    onClick={() => {
+                                                                        const newOptionImages = [...(q.optionImages || [])];
+                                                                        newOptionImages[oIndex] = null;
+                                                                        handleUpdateQuestion(qIndex, { optionImages: newOptionImages });
+                                                                    }}
+                                                                    className="absolute -top-1 -right-1 bg-duo-red text-white w-5 h-5 rounded-full text-xs flex items-center justify-center"
+                                                                >
+                                                                    ✕
+                                                                </button>
+                                                            </div>
+                                                        ) : (
+                                                            <label className="inline-flex items-center gap-1 px-2 py-1 bg-duo-gray-100 rounded cursor-pointer hover:bg-duo-gray-200 text-xs mt-1">
+                                                                <span>🖼️</span>
+                                                                <span>{language === 'id' ? 'Gambar' : 'Image'}</span>
+                                                                <input
+                                                                    type="file"
+                                                                    accept="image/*"
+                                                                    className="hidden"
+                                                                    onChange={(e) => {
+                                                                        const file = e.target.files?.[0];
+                                                                        if (file) {
+                                                                            handleImageUpload(file, (base64) => {
+                                                                                const newOptionImages = [...(q.optionImages || [null, null, null, null])];
+                                                                                newOptionImages[oIndex] = base64;
+                                                                                handleUpdateQuestion(qIndex, { optionImages: newOptionImages });
+                                                                            });
+                                                                        }
+                                                                    }}
+                                                                />
+                                                            </label>
+                                                        )}
                                                     </div>
                                                 ))}
                                             </div>
@@ -566,61 +731,201 @@ export default function TeacherContentPage() {
                     </section>
                 </main>
 
-                {/* Scan Modal */}
+                {/* Scan Modal - Multi-step */}
                 {isScanModalOpen && (
                     <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
                         <div className="bg-white rounded-2xl w-full max-w-lg p-6 animate-slide-up">
-                            <div className="flex justify-between items-center mb-6">
-                                <h2 className="text-xl font-bold text-duo-gray-900">
-                                    📸 {language === 'id' ? 'Scan Soal dari Gambar' : 'Scan Quiz from Image'}
-                                </h2>
-                                <button onClick={() => setIsScanModalOpen(false)} className="text-duo-gray-400 hover:text-duo-gray-600">✕</button>
+                            {/* Header with step indicator */}
+                            <div className="flex justify-between items-center mb-4">
+                                <div>
+                                    <h2 className="text-xl font-bold text-duo-gray-900">
+                                        📸 {language === 'id' ? 'Buat Soal dari Foto' : 'Create Quiz from Photo'}
+                                    </h2>
+                                    <div className="flex gap-2 mt-2">
+                                        {['upload', 'preferences', 'processing'].map((step, idx) => (
+                                            <div key={step} className={`h-1 w-12 rounded-full ${scanStep === step ? 'bg-duo-blue' :
+                                                    (['upload', 'preferences', 'processing'].indexOf(scanStep) > idx) ? 'bg-duo-green' : 'bg-duo-gray-200'
+                                                }`} />
+                                        ))}
+                                    </div>
+                                </div>
+                                <button
+                                    onClick={() => { setIsScanModalOpen(false); setScanStep('upload'); setScanImage(null); }}
+                                    className="text-duo-gray-400 hover:text-duo-gray-600 text-xl"
+                                >✕</button>
                             </div>
 
-                            <p className="text-duo-gray-500 mb-4 text-sm">
-                                {language === 'id'
-                                    ? 'Upload foto soal (kertas ujian, buku, dll). AI akan membaca dan mengubahnya menjadi kuis interaktif.'
-                                    : 'Upload a photo of potential questions. AI will read and convert it into interactive quiz.'}
-                            </p>
+                            {/* Step 1: Upload */}
+                            {scanStep === 'upload' && (
+                                <>
+                                    <p className="text-duo-gray-500 mb-4 text-sm">
+                                        {language === 'id'
+                                            ? 'Upload foto materi atau soal (buku, kertas ujian, dll).'
+                                            : 'Upload a photo of material or quiz (book, exam paper, etc).'}
+                                    </p>
 
-                            <div className="border-2 border-dashed border-duo-gray-300 rounded-xl p-6 text-center hover:bg-duo-gray-50 transition-colors cursor-pointer relative mb-6">
-                                <input
-                                    type="file"
-                                    onChange={handleScanUpload}
-                                    className="absolute inset-0 opacity-0 cursor-pointer"
-                                    accept="image/*"
-                                />
-                                {scanImage ? (
-                                    <div className="relative h-48 w-full">
-                                        <Image src={scanImage} alt="Preview" fill className="object-contain rounded-lg" />
+                                    <div className="border-2 border-dashed border-duo-gray-300 rounded-xl p-6 text-center hover:bg-duo-gray-50 transition-colors cursor-pointer relative mb-4">
+                                        <input
+                                            type="file"
+                                            onChange={handleScanUpload}
+                                            className="absolute inset-0 opacity-0 cursor-pointer"
+                                            accept="image/*"
+                                        />
+                                        {scanImage ? (
+                                            <div className="relative h-48 w-full">
+                                                <Image src={scanImage} alt="Preview" fill className="object-contain rounded-lg" />
+                                                <button
+                                                    onClick={(e) => { e.stopPropagation(); setScanImage(null); }}
+                                                    className="absolute top-2 right-2 bg-duo-red text-white w-8 h-8 rounded-full flex items-center justify-center shadow-lg hover:bg-duo-red/80 z-10"
+                                                >✕</button>
+                                            </div>
+                                        ) : (
+                                            <div className="py-8">
+                                                <p className="text-4xl mb-2">🖼️</p>
+                                                <p className="text-sm font-bold text-duo-purple">
+                                                    {language === 'id' ? 'Klik untuk ambil foto / upload' : 'Click to take photo / upload'}
+                                                </p>
+                                            </div>
+                                        )}
                                     </div>
-                                ) : (
-                                    <div className="py-8">
-                                        <p className="text-4xl mb-2">🖼️</p>
-                                        <p className="text-sm font-bold text-duo-purple">
-                                            {language === 'id' ? 'Klik untuk ambil foto / upload' : 'Click to take photo / upload'}
-                                        </p>
-                                    </div>
-                                )}
-                            </div>
 
-                            <button
-                                onClick={handleProcessScan}
-                                disabled={!scanImage || isScanning}
-                                className="btn btn-primary btn-full flex items-center justify-center gap-2"
-                            >
-                                {isScanning ? (
-                                    <>
-                                        <span className="animate-spin">⏳</span>
-                                        {language === 'id' ? 'Sedang Menganalisis...' : 'Analyzing Image...'}
-                                    </>
-                                ) : (
-                                    <>
-                                        <span>✨</span>
-                                        {language === 'id' ? 'Proses dengan AI' : 'Process with AI'}
-                                    </>
-                                )}
-                            </button>
+                                    <button
+                                        onClick={() => setScanStep('preferences')}
+                                        disabled={!scanImage}
+                                        className="btn btn-primary btn-full"
+                                    >
+                                        {language === 'id' ? 'Lanjut →' : 'Continue →'}
+                                    </button>
+                                </>
+                            )}
+
+                            {/* Step 2: AI Preferences */}
+                            {scanStep === 'preferences' && (
+                                <>
+                                    <p className="text-duo-gray-500 mb-4 text-sm">
+                                        {language === 'id'
+                                            ? '🤖 Tentukan jenis soal yang ingin dibuat dari materi ini.'
+                                            : '🤖 Choose what type of questions to generate from this material.'}
+                                    </p>
+
+                                    {/* Preview image */}
+                                    {scanImage && (
+                                        <div className="relative h-32 w-full mb-4 bg-duo-gray-100 rounded-lg overflow-hidden">
+                                            <Image src={scanImage} alt="Preview" fill className="object-contain" />
+                                        </div>
+                                    )}
+
+                                    <div className="space-y-4">
+                                        {/* Question Type */}
+                                        <div>
+                                            <label className="block text-sm font-semibold text-duo-gray-700 mb-2">
+                                                {language === 'id' ? 'Jenis Soal' : 'Question Type'}
+                                            </label>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {[
+                                                    { value: 'choice', label: language === 'id' ? '🔘 Pilihan Ganda' : '🔘 Multiple Choice', labelShort: 'PG' },
+                                                    { value: 'essay', label: language === 'id' ? '📝 Essay' : '📝 Essay', labelShort: 'Essay' },
+                                                    { value: 'mixed', label: language === 'id' ? '🔀 Campuran' : '🔀 Mixed', labelShort: 'Mix' },
+                                                ].map(opt => (
+                                                    <button
+                                                        key={opt.value}
+                                                        onClick={() => setScanPreferences(p => ({ ...p, questionType: opt.value as any }))}
+                                                        className={`p-3 rounded-xl text-center transition-all ${scanPreferences.questionType === opt.value
+                                                                ? 'bg-duo-blue text-white'
+                                                                : 'bg-duo-gray-100 hover:bg-duo-gray-200'
+                                                            }`}
+                                                    >
+                                                        <div className="text-lg">{opt.label.split(' ')[0]}</div>
+                                                        <div className="text-xs">{opt.label.split(' ').slice(1).join(' ')}</div>
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Difficulty */}
+                                        <div>
+                                            <label className="block text-sm font-semibold text-duo-gray-700 mb-2">
+                                                {language === 'id' ? 'Tingkat Kesulitan' : 'Difficulty'}
+                                            </label>
+                                            <div className="grid grid-cols-3 gap-2">
+                                                {[
+                                                    { value: 'easy', label: language === 'id' ? '🌱 Mudah' : '🌱 Easy' },
+                                                    { value: 'medium', label: language === 'id' ? '🌿 Sedang' : '🌿 Medium' },
+                                                    { value: 'hard', label: language === 'id' ? '🌳 Sulit' : '🌳 Hard' },
+                                                ].map(opt => (
+                                                    <button
+                                                        key={opt.value}
+                                                        onClick={() => setScanPreferences(p => ({ ...p, difficulty: opt.value as any }))}
+                                                        className={`p-2 rounded-lg text-sm transition-all ${scanPreferences.difficulty === opt.value
+                                                                ? 'bg-duo-green text-white'
+                                                                : 'bg-duo-gray-100 hover:bg-duo-gray-200'
+                                                            }`}
+                                                    >
+                                                        {opt.label}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+
+                                        {/* Count */}
+                                        <div>
+                                            <label className="block text-sm font-semibold text-duo-gray-700 mb-2">
+                                                {language === 'id' ? 'Jumlah Soal' : 'Number of Questions'}
+                                            </label>
+                                            <div className="flex gap-2">
+                                                {[5, 10, 15, 20].map(num => (
+                                                    <button
+                                                        key={num}
+                                                        onClick={() => setScanPreferences(p => ({ ...p, count: num }))}
+                                                        className={`flex-1 py-2 rounded-lg font-bold transition-all ${scanPreferences.count === num
+                                                                ? 'bg-duo-purple text-white'
+                                                                : 'bg-duo-gray-100 hover:bg-duo-gray-200'
+                                                            }`}
+                                                    >
+                                                        {num}
+                                                    </button>
+                                                ))}
+                                            </div>
+                                        </div>
+                                    </div>
+
+                                    <div className="flex gap-2 mt-6">
+                                        <button
+                                            onClick={() => setScanStep('upload')}
+                                            className="btn btn-outline flex-1"
+                                        >
+                                            ← {language === 'id' ? 'Kembali' : 'Back'}
+                                        </button>
+                                        <button
+                                            onClick={handleProcessScan}
+                                            disabled={isScanning}
+                                            className="btn btn-primary flex-1 flex items-center justify-center gap-2"
+                                        >
+                                            ✨ {language === 'id' ? 'Buat Soal' : 'Generate'}
+                                        </button>
+                                    </div>
+                                </>
+                            )}
+
+                            {/* Step 3: Processing */}
+                            {scanStep === 'processing' && (
+                                <div className="py-12 text-center">
+                                    <div className="text-6xl mb-4 animate-bounce">🤖</div>
+                                    <p className="text-lg font-bold text-duo-gray-900 mb-2">
+                                        {language === 'id' ? 'AI sedang membaca materi...' : 'AI is reading the material...'}
+                                    </p>
+                                    <p className="text-sm text-duo-gray-500">
+                                        {language === 'id'
+                                            ? `Membuat ${scanPreferences.count} soal ${scanPreferences.questionType === 'choice' ? 'pilihan ganda' : scanPreferences.questionType === 'essay' ? 'essay' : 'campuran'}`
+                                            : `Creating ${scanPreferences.count} ${scanPreferences.questionType} questions`}
+                                    </p>
+                                    <div className="mt-4 flex justify-center">
+                                        <div className="w-48 h-2 bg-duo-gray-200 rounded-full overflow-hidden">
+                                            <div className="h-full bg-duo-blue animate-pulse" style={{ width: '60%' }} />
+                                        </div>
+                                    </div>
+                                </div>
+                            )}
                         </div>
                     </div>
                 )}
@@ -700,8 +1005,8 @@ export default function TeacherContentPage() {
                                 {/* Repeatability Info */}
                                 <div className="flex items-center gap-2 mb-4">
                                     <span className={`text-xs px-2 py-1 rounded-full ${draft.isRepeatable
-                                            ? 'bg-duo-green/20 text-duo-green'
-                                            : 'bg-duo-orange/20 text-duo-orange'
+                                        ? 'bg-duo-green/20 text-duo-green'
+                                        : 'bg-duo-orange/20 text-duo-orange'
                                         }`}>
                                         {draft.isRepeatable
                                             ? `🔄 ${draft.maxAttempts ? `${draft.maxAttempts}x` : '∞'}`
