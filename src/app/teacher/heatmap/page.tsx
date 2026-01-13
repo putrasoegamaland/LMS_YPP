@@ -57,14 +57,6 @@ export default function TeacherHeatmapPage() {
     const [selectedTopic, setSelectedTopic] = useState<string | null>(null);
     const [sortBy, setSortBy] = useState<'name' | 'average'>('name');
 
-    if (authLoading || !isTeacher) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-duo-gray-100">
-                <div className="spinner"></div>
-            </div>
-        );
-    }
-
     const filteredStudents = MOCK_STUDENTS.filter(s => s.classId === selectedClass);
 
     const sortedStudents = useMemo(() => {
@@ -84,6 +76,14 @@ export default function TeacherHeatmapPage() {
         }
         return avgs;
     }, [filteredStudents]);
+
+    if (authLoading || !isTeacher) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-duo-gray-100">
+                <div className="spinner"></div>
+            </div>
+        );
+    }
 
     const getHeatColor = (score: number) => {
         if (score >= 80) return 'bg-green-500';

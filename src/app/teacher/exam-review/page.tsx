@@ -33,21 +33,7 @@ export default function TeacherExamReviewPage() {
     const [sortBy, setSortBy] = useState<'date' | 'score'>('date');
     const [reviewStatuses, setReviewStatuses] = useState<Record<string, ReviewStatus>>({});
 
-    // Redirect if not teacher
-    if (authLoading) {
-        return (
-            <div className="min-h-screen flex items-center justify-center bg-duo-gray-100">
-                <div className="spinner"></div>
-            </div>
-        );
-    }
-
-    if (!isTeacher) {
-        router.push('/login?role=teacher');
-        return null;
-    }
-
-    // Filter and sort sessions
+    // Filter and sort sessions - must be before early returns
     const filteredSessions = useMemo(() => {
         let result = [...sessions];
 
@@ -68,6 +54,20 @@ export default function TeacherExamReviewPage() {
 
         return result;
     }, [sessions, filterSeverity, sortBy]);
+
+    // Redirect if not teacher
+    if (authLoading) {
+        return (
+            <div className="min-h-screen flex items-center justify-center bg-duo-gray-100">
+                <div className="spinner"></div>
+            </div>
+        );
+    }
+
+    if (!isTeacher) {
+        router.push('/login?role=teacher');
+        return null;
+    }
 
     const handleReviewAction = (sessionId: string, status: ReviewStatus) => {
         setReviewStatuses(prev => ({ ...prev, [sessionId]: status }));
@@ -196,9 +196,9 @@ export default function TeacherExamReviewPage() {
                                 <div
                                     key={session.sessionId}
                                     className={`card border-l-4 ${status === 'approved' ? 'border-l-duo-green' :
-                                            status === 'flagged' ? 'border-l-duo-red' :
-                                                status === 'dismissed' ? 'border-l-duo-gray-300' :
-                                                    'border-l-duo-yellow'
+                                        status === 'flagged' ? 'border-l-duo-red' :
+                                            status === 'dismissed' ? 'border-l-duo-gray-300' :
+                                                'border-l-duo-yellow'
                                         }`}
                                 >
                                     <div className="flex items-start justify-between mb-4">
@@ -267,8 +267,8 @@ export default function TeacherExamReviewPage() {
                                             </>
                                         ) : (
                                             <span className={`px-4 py-2 rounded-lg text-sm font-bold ${status === 'approved' ? 'bg-duo-green/10 text-duo-green' :
-                                                    status === 'flagged' ? 'bg-duo-red/10 text-duo-red' :
-                                                        'bg-duo-gray-100 text-duo-gray-500'
+                                                status === 'flagged' ? 'bg-duo-red/10 text-duo-red' :
+                                                    'bg-duo-gray-100 text-duo-gray-500'
                                                 }`}>
                                                 {status === 'approved' ? '✓ OK' : status === 'flagged' ? '🚩 Flagged' : 'Dismissed'}
                                             </span>
@@ -333,13 +333,13 @@ export default function TeacherExamReviewPage() {
                                     <div
                                         key={event.id}
                                         className={`flex items-start gap-3 p-3 rounded-lg ${event.severity === 'high' ? 'bg-duo-red/5' :
-                                                event.severity === 'medium' ? 'bg-duo-yellow/5' :
-                                                    'bg-duo-gray-50'
+                                            event.severity === 'medium' ? 'bg-duo-yellow/5' :
+                                                'bg-duo-gray-50'
                                             }`}
                                     >
                                         <div className={`w-2 h-2 rounded-full mt-2 ${event.severity === 'high' ? 'bg-duo-red' :
-                                                event.severity === 'medium' ? 'bg-duo-yellow' :
-                                                    'bg-duo-gray-300'
+                                            event.severity === 'medium' ? 'bg-duo-yellow' :
+                                                'bg-duo-gray-300'
                                             }`} />
                                         <div className="flex-1">
                                             <div className="flex items-center justify-between">

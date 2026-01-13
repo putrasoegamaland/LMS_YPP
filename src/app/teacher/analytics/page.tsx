@@ -73,6 +73,18 @@ export default function TeacherAnalyticsPage() {
     const [selectedClass, setSelectedClass] = useState<string>('all');
     const [selectedStudent, setSelectedStudent] = useState<StudentAnalytics | null>(null);
 
+    const filteredStudents = selectedClass === 'all'
+        ? MOCK_STUDENTS
+        : MOCK_STUDENTS.filter(s => s.classId === selectedClass);
+
+    const overallStats = useMemo(() => ({
+        totalStudents: MOCK_STUDENTS.length,
+        activeToday: MOCK_STUDENTS.filter(s => s.lastActive.startsWith('2026-01-13')).length,
+        averageScore: Math.round(MOCK_STUDENTS.reduce((acc, s) => acc + s.averageScore, 0) / MOCK_STUDENTS.length),
+        totalXp: MOCK_STUDENTS.reduce((acc, s) => acc + s.xp, 0),
+        needsAttention: MOCK_STUDENTS.filter(s => s.averageScore < 70).length,
+    }), []);
+
     // Auth check
     useEffect(() => {
         if (!authLoading && !isTeacher) {
@@ -87,18 +99,6 @@ export default function TeacherAnalyticsPage() {
             </div>
         );
     }
-
-    const filteredStudents = selectedClass === 'all'
-        ? MOCK_STUDENTS
-        : MOCK_STUDENTS.filter(s => s.classId === selectedClass);
-
-    const overallStats = useMemo(() => ({
-        totalStudents: MOCK_STUDENTS.length,
-        activeToday: MOCK_STUDENTS.filter(s => s.lastActive.startsWith('2026-01-13')).length,
-        averageScore: Math.round(MOCK_STUDENTS.reduce((acc, s) => acc + s.averageScore, 0) / MOCK_STUDENTS.length),
-        totalXp: MOCK_STUDENTS.reduce((acc, s) => acc + s.xp, 0),
-        needsAttention: MOCK_STUDENTS.filter(s => s.averageScore < 70).length,
-    }), []);
 
     const getScoreColor = (score: number) => {
         if (score >= 80) return 'text-duo-green';
@@ -174,8 +174,8 @@ export default function TeacherAnalyticsPage() {
                             key={tab.id}
                             onClick={() => setActiveTab(tab.id as any)}
                             className={`px-4 py-2 rounded-lg font-semibold transition-colors ${activeTab === tab.id
-                                    ? 'bg-duo-blue text-white'
-                                    : 'bg-white text-duo-gray-600 hover:bg-duo-gray-100'
+                                ? 'bg-duo-blue text-white'
+                                : 'bg-white text-duo-gray-600 hover:bg-duo-gray-100'
                                 }`}
                         >
                             {tab.label}
