@@ -7,9 +7,10 @@ import { useLanguage } from '@/contexts/LanguageContext';
 import { useGame } from '@/contexts/GameContext';
 import { useAIHint } from '@/contexts/AIHintContext';
 import AIHintPanel from '@/components/AIHintPanel';
+import { quizService } from '@/lib/db';
 
-// Demo questions for Daily Sprint
-const SPRINT_QUESTIONS = [
+// Default questions for Daily Sprint (fallback if no quizzes in DB)
+const DEFAULT_SPRINT_QUESTIONS = [
     {
         id: 'sprint-1',
         question: { id: 'Berapa hasil dari 7 × 8?', en: 'What is 7 × 8?' },
@@ -52,6 +53,15 @@ const SPRINT_QUESTIONS = [
     },
 ];
 
+type SprintQuestion = {
+    id: string;
+    question: { id: string; en: string };
+    options: string[];
+    correctAnswer: string;
+    difficulty: 'easy' | 'medium' | 'hard';
+    points: number;
+};
+
 export default function DailySprintPage() {
     const router = useRouter();
     const { isStudent, isLoading: authLoading } = useAuth();
@@ -61,6 +71,8 @@ export default function DailySprintPage() {
 
     // Sprint state
     const [phase, setPhase] = useState<'intro' | 'playing' | 'results'>('intro');
+    const [questions, setQuestions] = useState<SprintQuestion[]>(DEFAULT_SPRINT_QUESTIONS);
+    const [loading, setLoading] = useState(true);
     const [currentQuestion, setCurrentQuestion] = useState(0);
     const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
     const [isAnswered, setIsAnswered] = useState(false);
@@ -80,6 +92,45 @@ export default function DailySprintPage() {
         }
     }, [isStudent, authLoading, router]);
 
+    // Fetch questions from quizService
+    useEffect(() => {
+        const fetchQuestions = async () => {
+            try {
+                const quizzes = await quizService.getAll();
+                // Collect all choice questions from all quizzes
+                const allQuestions: SprintQuestion[] = [];
+
+                for (const quiz of quizzes) {
+                    if (quiz.questions && Array.isArray(quiz.questions)) {
+                        for (const q of quiz.questions) {
+                            if (q.type === 'choice' && q.options && q.options.length >= 2) {
+                                allQuestions.push({
+                                    id: q.id || `q-${Date.now()}-${Math.random()}`,
+                                    question: { id: q.text || '', en: q.text || '' },
+                                    options: q.options,
+                                    correctAnswer: q.correctAnswer || q.options[q.correctOption] || q.options[0],
+                                    difficulty: (q.difficulty as 'easy' | 'medium' | 'hard') || 'medium',
+                                    points: q.difficulty === 'easy' ? 10 : q.difficulty === 'hard' ? 20 : 15,
+                                });
+                            }
+                        }
+                    }
+                }
+
+                // Shuffle and pick 5 random questions, or use defaults
+                if (allQuestions.length >= 5) {
+                    const shuffled = allQuestions.sort(() => Math.random() - 0.5).slice(0, 5);
+                    setQuestions(shuffled);
+                }
+            } catch (err) {
+                console.error('Failed to fetch sprint questions:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchQuestions();
+    }, []);
+
     // Timer
     useEffect(() => {
         if (phase !== 'playing' || timeLeft <= 0) return;
@@ -97,7 +148,7 @@ export default function DailySprintPage() {
         return () => clearInterval(timer);
     }, [phase, timeLeft]);
 
-    if (authLoading || !isStudent) {
+    if (authLoading || !isStudent || loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-duo-gray-100">
                 <div className="spinner"></div>
@@ -105,8 +156,8 @@ export default function DailySprintPage() {
         );
     }
 
-    const question = SPRINT_QUESTIONS[currentQuestion];
-    const progress = ((currentQuestion + 1) / SPRINT_QUESTIONS.length) * 100;
+    const question = questions[currentQuestion];
+    const progress = ((currentQuestion + 1) / questions.length) * 100;
     const minutes = Math.floor(timeLeft / 60);
     const seconds = timeLeft % 60;
 
@@ -139,7 +190,7 @@ export default function DailySprintPage() {
     };
 
     const handleNext = () => {
-        if (currentQuestion < SPRINT_QUESTIONS.length - 1) {
+        if (currentQuestion < questions.length - 1) {
             setCurrentQuestion(prev => prev + 1);
             setSelectedAnswer(null);
             setIsAnswered(false);
@@ -158,7 +209,7 @@ export default function DailySprintPage() {
         addXp(score);
 
         // Complete quiz for stats
-        completeQuiz('daily-sprint', correctCount, SPRINT_QUESTIONS.length);
+        completeQuiz('daily-sprint', correctCount, questions.length);
 
         // Check for sprinter badge
         if (!hasBadge('sprinter') && correctCount >= 4) {
@@ -232,7 +283,7 @@ export default function DailySprintPage() {
 
     // Results Phase
     if (phase === 'results') {
-        const percentage = Math.round((correctCount / SPRINT_QUESTIONS.length) * 100);
+        const percentage = Math.round((correctCount / questions.length) * 100);
         const rating = percentage >= 80 ? '🎉' : percentage >= 60 ? '👍' : '💪';
         const message = percentage >= 80
             ? (language === 'id' ? 'Luar Biasa!' : 'Amazing!')
@@ -248,7 +299,7 @@ export default function DailySprintPage() {
 
                     <div className="grid grid-cols-2 gap-4 my-6">
                         <div className="bg-duo-green/10 rounded-xl p-4">
-                            <div className="text-3xl font-bold text-duo-green">{correctCount}/{SPRINT_QUESTIONS.length}</div>
+                            <div className="text-3xl font-bold text-duo-green">{correctCount}/{questions.length}</div>
                             <div className="text-sm text-duo-gray-500">
                                 {language === 'id' ? 'Benar' : 'Correct'}
                             </div>
@@ -316,8 +367,8 @@ export default function DailySprintPage() {
                 {/* Difficulty badge */}
                 <div className="flex items-center gap-2 mb-4">
                     <span className={`badge ${question.difficulty === 'easy' ? 'bg-duo-green/20 text-duo-green' :
-                            question.difficulty === 'medium' ? 'bg-duo-yellow/20 text-duo-yellow-dark' :
-                                'bg-duo-red/20 text-duo-red'
+                        question.difficulty === 'medium' ? 'bg-duo-yellow/20 text-duo-yellow-dark' :
+                            'bg-duo-red/20 text-duo-red'
                         }`}>
                         {question.difficulty === 'easy' ? '🟢' : question.difficulty === 'medium' ? '🟡' : '🔴'}
                         {question.difficulty.toUpperCase()}
@@ -403,7 +454,7 @@ export default function DailySprintPage() {
                         </button>
                     ) : (
                         <button onClick={handleNext} className="btn btn-warning btn-lg btn-full">
-                            {currentQuestion < SPRINT_QUESTIONS.length - 1
+                            {currentQuestion < questions.length - 1
                                 ? t('quiz.next')
                                 : (language === 'id' ? 'Selesai' : 'Finish')}
                         </button>

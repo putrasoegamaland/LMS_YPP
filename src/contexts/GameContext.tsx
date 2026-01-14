@@ -114,7 +114,7 @@ export function GameProvider({ children }: { children: ReactNode }) {
         }
     }, [user?.id]);
 
-    // Save to localStorage when state changes
+    // Save to localStorage when state changes and sync with studentService
     useEffect(() => {
         if (user?.id) {
             const progress: StudentProgress = {
@@ -133,8 +133,18 @@ export function GameProvider({ children }: { children: ReactNode }) {
                 },
             };
             localStorage.setItem(`${STORAGE_KEY}_${user.id}`, JSON.stringify(progress));
+
+            // Sync with central student database for leaderboard
+            import('@/lib/db').then(({ studentService }) => {
+                studentService.update(user.id, {
+                    xp,
+                    level,
+                    streak,
+                    avatar: user.avatar || '🦊'
+                }).catch(console.error);
+            });
         }
-    }, [user?.id, xp, level, streak, badges, completedQuizzes]);
+    }, [user?.id, user?.avatar, xp, level, streak, badges, completedQuizzes]);
 
     // Update streak based on last active date
     const updateStreak = (progress: StudentProgress) => {

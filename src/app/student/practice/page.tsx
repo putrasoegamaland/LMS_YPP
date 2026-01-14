@@ -9,191 +9,13 @@ import { useAIHint } from '@/contexts/AIHintContext';
 import AIHintPanel from '@/components/AIHintPanel';
 import Image from 'next/image';
 
-// Demo quiz data
-const PRACTICE_QUIZZES = [
-    {
-        id: 'math-algebra',
-        title: { id: 'Aljabar Dasar', en: 'Basic Algebra' },
-        subject: 'matematika',
-        icon: '🧮',
-        questionCount: 5,
-        difficulty: 'medium' as const,
-        xpReward: 50,
-        isExamMode: false,
-    },
-    {
-        id: 'math-geometry',
-        title: { id: 'Geometri', en: 'Geometry' },
-        subject: 'matematika',
-        icon: '📐',
-        questionCount: 5,
-        difficulty: 'easy' as const,
-        xpReward: 40,
-        isExamMode: false,
-    },
-    {
-        id: 'exam-1',
-        title: { id: '🔒 Ujian Matematika', en: '🔒 Math Exam' },
-        subject: 'matematika',
-        icon: '📝',
-        questionCount: 10,
-        difficulty: 'hard' as const,
-        xpReward: 100,
-        isExamMode: true,
-        timeLimit: 30, // minutes
-    },
-];
+import { quizService, QuizData } from '@/lib/db';
 
-const QUIZ_QUESTIONS: Record<string, Array<{
-    id: string;
-    question: { id: string; en: string };
-    type: 'choice' | 'essay';
-    options?: string[];
-    correctAnswer?: string;
-    points: number;
-    hints?: { level1: { id: string; en: string }; level2: { id: string; en: string }; level3: { id: string; en: string } };
-    // Essay fields
-    minWords?: number;
-    rubric?: { id: string; en: string };
-    keywords?: string[];
-}>> = {
-    'math-algebra': [
-        {
-            id: 'alg-1',
-            question: { id: 'Jika 3x + 6 = 15, maka x = ?', en: 'If 3x + 6 = 15, then x = ?' },
-            type: 'choice',
-            options: ['2', '3', '4', '5'],
-            correctAnswer: '3',
-            points: 10,
-            hints: {
-                level1: { id: 'Ingat cara mengisolasi variabel x.', en: 'Remember how to isolate variable x.' },
-                level2: { id: 'Coba pindahkan angka 6 ke sisi lain persamaan.', en: 'Try moving 6 to the other side.' },
-                level3: { id: 'Kurangi 6 dari kedua sisi: 3x = 9. Lalu bagi dengan 3.', en: 'Subtract 6 from both sides: 3x = 9. Then divide by 3.' },
-            },
-        },
-        {
-            id: 'alg-2',
-            question: { id: '2x - 4 = 10. Berapa nilai x?', en: '2x - 4 = 10. What is x?' },
-            type: 'choice',
-            options: ['5', '6', '7', '8'],
-            correctAnswer: '7',
-            points: 10,
-            hints: {
-                level1: { id: 'Operasi invers adalah kunci!', en: 'Inverse operations are key!' },
-                level2: { id: 'Tambahkan 4 ke kedua sisi dulu.', en: 'Add 4 to both sides first.' },
-                level3: { id: '2x = 14, maka x = 14/2 = ...', en: '2x = 14, so x = 14/2 = ...' },
-            },
-        },
-        {
-            id: 'alg-3',
-            question: { id: 'Sederhanakan: 5a + 3b - 2a + b', en: 'Simplify: 5a + 3b - 2a + b' },
-            type: 'choice',
-            options: ['3a + 4b', '3a + 2b', '7a + 4b', '3a + 3b'],
-            correctAnswer: '3a + 4b',
-            points: 15,
-            hints: {
-                level1: { id: 'Kelompokkan suku sejenis.', en: 'Group like terms.' },
-                level2: { id: 'Suku dengan "a" dan suku dengan "b" dikelompokkan.', en: 'Group terms with "a" and terms with "b".' },
-                level3: { id: '(5a - 2a) + (3b + b) = ?', en: '(5a - 2a) + (3b + b) = ?' },
-            },
-        },
-        {
-            id: 'alg-4',
-            question: { id: 'Jika y = 2x + 3 dan x = 4, maka y = ?', en: 'If y = 2x + 3 and x = 4, then y = ?' },
-            type: 'choice',
-            options: ['9', '10', '11', '12'],
-            correctAnswer: '11',
-            points: 10,
-        },
-        {
-            id: 'alg-5',
-            question: { id: 'Faktorkan: x² - 9', en: 'Factor: x² - 9' },
-            type: 'choice',
-            options: ['(x-3)(x-3)', '(x+3)(x-3)', '(x+9)(x-1)', '(x-9)(x+1)'],
-            correctAnswer: '(x+3)(x-3)',
-            points: 20,
-            hints: {
-                level1: { id: 'Ini adalah selisih dua kuadrat.', en: 'This is a difference of squares.' },
-                level2: { id: 'Rumus: a² - b² = (a+b)(a-b)', en: 'Formula: a² - b² = (a+b)(a-b)' },
-                level3: { id: 'x² = x², dan 9 = 3². Jadi...', en: 'x² = x², and 9 = 3². So...' },
-            },
-        },
-        {
-            id: 'alg-essay-1',
-            question: {
-                id: 'Jelaskan dengan kata-katamu sendiri, apa yang dimaksud dengan variabel dalam aljabar? Berikan minimal 2 contoh penggunaan variabel dalam kehidupan sehari-hari.',
-                en: 'Explain in your own words, what is a variable in algebra? Give at least 2 examples of variables used in daily life.'
-            },
-            type: 'essay',
-            points: 25,
-            minWords: 30,
-            rubric: {
-                id: 'Jawaban harus mencakup: (1) Definisi variabel (2) Minimal 2 contoh nyata',
-                en: 'Answer must include: (1) Variable definition (2) At least 2 real examples'
-            },
-            keywords: ['variabel', 'simbol', 'nilai', 'belum diketahui', 'huruf'],
-        },
-    ],
-    'math-geometry': [
-        {
-            id: 'geo-1',
-            question: { id: 'Luas persegi dengan sisi 8 cm adalah...', en: 'Area of square with side 8 cm is...' },
-            type: 'choice',
-            options: ['32 cm²', '48 cm²', '64 cm²', '72 cm²'],
-            correctAnswer: '64 cm²',
-            points: 10,
-        },
-        {
-            id: 'geo-2',
-            question: { id: 'Keliling lingkaran dengan diameter 14 cm adalah... (π = 22/7)', en: 'Circumference of circle with diameter 14 cm is... (π = 22/7)' },
-            type: 'choice',
-            options: ['22 cm', '44 cm', '88 cm', '154 cm'],
-            correctAnswer: '44 cm',
-            points: 15,
-        },
-        {
-            id: 'geo-3',
-            question: { id: 'Luas segitiga dengan alas 10 cm dan tinggi 6 cm adalah...', en: 'Area of triangle with base 10 cm and height 6 cm is...' },
-            type: 'choice',
-            options: ['30 cm²', '60 cm²', '16 cm²', '20 cm²'],
-            correctAnswer: '30 cm²',
-            points: 10,
-        },
-        {
-            id: 'geo-4',
-            question: { id: 'Volume kubus dengan sisi 5 cm adalah...', en: 'Volume of cube with side 5 cm is...' },
-            type: 'choice',
-            options: ['25 cm³', '75 cm³', '100 cm³', '125 cm³'],
-            correctAnswer: '125 cm³',
-            points: 15,
-        },
-        {
-            id: 'geo-5',
-            question: { id: 'Jumlah sudut dalam segitiga adalah...', en: 'Sum of interior angles in a triangle is...' },
-            type: 'choice',
-            options: ['90°', '180°', '270°', '360°'],
-            correctAnswer: '180°',
-            points: 10,
-        },
-    ],
-    'exam-1': [
-        {
-            id: 'exam-1',
-            question: { id: 'Jika 5x - 10 = 25, maka x = ?', en: 'If 5x - 10 = 25, then x = ?' },
-            type: 'choice',
-            options: ['5', '6', '7', '8'],
-            correctAnswer: '7',
-            points: 10,
-        },
-        {
-            id: 'exam-2',
-            question: { id: 'Luas lingkaran dengan jari-jari 7 cm adalah... (π = 22/7)', en: 'Area of circle with radius 7 cm is... (π = 22/7)' },
-            type: 'choice',
-            options: ['44 cm²', '88 cm²', '154 cm²', '308 cm²'],
-            correctAnswer: '154 cm²',
-            points: 10,
-        },
-    ],
+type PracticeQuiz = QuizData & {
+    icon: string;
+    questionCount: number;
+    difficulty: 'easy' | 'medium' | 'hard';
+    xpReward: number;
 };
 
 interface PracticeState {
@@ -203,6 +25,17 @@ interface PracticeState {
     answers: Record<string, string>;
     startTime: number | null;
 }
+
+const getSubjectIcon = (subject: string) => {
+    switch (subject.toLowerCase()) {
+        case 'matematika': return '🧮';
+        case 'bahasa_inggris': return '🇬🇧';
+        case 'ipa': return '🔬';
+        case 'ips': return '🌍';
+        case 'pkn': return '🇮🇩';
+        default: return '📝';
+    }
+};
 
 export default function PracticePage() {
     const router = useRouter();
@@ -218,6 +51,11 @@ export default function PracticePage() {
         answers: {},
         startTime: null,
     });
+
+    // Quizzes from DB
+    const [quizzes, setQuizzes] = useState<PracticeQuiz[]>([]);
+    const [loading, setLoading] = useState(true);
+
     const [selectedAnswer, setSelectedAnswer] = useState<string | null>(null);
     const [essayAnswer, setEssayAnswer] = useState('');
     const [isAnswered, setIsAnswered] = useState(false);
@@ -235,6 +73,28 @@ export default function PracticePage() {
         }
     }, [isStudent, authLoading, router]);
 
+    // Fetch quizzes
+    useEffect(() => {
+        const fetchQuizzes = async () => {
+            try {
+                const data = await quizService.getAll();
+                const mapped = data.map(q => ({
+                    ...q,
+                    icon: getSubjectIcon(q.subject),
+                    questionCount: q.questions.length,
+                    difficulty: 'medium' as const, // default for now
+                    xpReward: q.questions.length * 10
+                }));
+                setQuizzes(mapped);
+            } catch (err) {
+                console.error('Failed to fetch quizzes:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchQuizzes();
+    }, []);
+
     // Clean up exam mode on unmount
     useEffect(() => {
         return () => {
@@ -242,7 +102,7 @@ export default function PracticePage() {
         };
     }, [setExamMode]);
 
-    if (authLoading || !isStudent) {
+    if (authLoading || !isStudent || loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-duo-gray-100">
                 <div className="spinner"></div>
@@ -250,12 +110,25 @@ export default function PracticePage() {
         );
     }
 
-    const activeQuizData = state.activeQuiz ? PRACTICE_QUIZZES.find(q => q.id === state.activeQuiz) : null;
-    const questions = state.activeQuiz ? QUIZ_QUESTIONS[state.activeQuiz] || [] : [];
+    const activeQuizData = state.activeQuiz ? quizzes.find(q => q.id === state.activeQuiz) : null;
+
+    // Map DB questions to UI format
+    const questions = activeQuizData?.questions.map((q: any) => ({
+        id: q.id,
+        question: { id: q.text, en: q.text }, // Use same text for both langs if not localized
+        type: q.type,
+        options: q.options,
+        correctAnswer: q.type === 'choice' ? q.options[q.correctOption] : undefined,
+        points: q.points || 10,
+        hints: undefined, // Hints not yet fully supported in DB schema
+        minWords: q.minWords,
+        rubric: q.rubric ? { id: q.rubric, en: q.rubric } : undefined,
+    })) || [];
+
     const currentQ = questions[state.currentQuestion];
 
     const handleStartQuiz = (quizId: string) => {
-        const quiz = PRACTICE_QUIZZES.find(q => q.id === quizId);
+        const quiz = quizzes.find(q => q.id === quizId);
         if (quiz?.isExamMode) {
             setExamMode(true);
         }
@@ -351,16 +224,16 @@ export default function PracticePage() {
             attemptCount: hintsUsed + 1,
         });
 
-        if (response.allowed && currentQ.hints) {
-            const hintLevel = response.level;
-            const hint = hintLevel === 1
-                ? currentQ.hints.level1
-                : hintLevel === 2
-                    ? currentQ.hints.level2
-                    : currentQ.hints.level3;
-            setCurrentHint(hint[language] || hint.id);
-            setShowHint(true);
-            setHintsUsed(prev => prev + 1);
+        if (response.allowed) {
+            if (currentQ.hints) {
+                // Use local hints if available (legacy support)
+                // ... (omitted since we defined hints as undefined)
+            } else if (response.hint) {
+                // Use AI-generated hint from context
+                setCurrentHint(response.hint[language] || response.hint.id);
+                setShowHint(true);
+                setHintsUsed(prev => prev + 1);
+            }
         }
     };
 
@@ -399,48 +272,57 @@ export default function PracticePage() {
                     </p>
 
                     <div className="space-y-4">
-                        {PRACTICE_QUIZZES.map(quiz => {
-                            const completed = isQuizCompleted(quiz.id);
-                            return (
-                                <div
-                                    key={quiz.id}
-                                    className={`card card-interactive ${quiz.isExamMode ? 'border-2 border-duo-red/30 bg-duo-red/5' : ''}`}
-                                    onClick={() => handleStartQuiz(quiz.id)}
-                                >
-                                    <div className="flex items-center gap-4">
-                                        <div className="text-4xl">{quiz.icon}</div>
-                                        <div className="flex-1">
-                                            <h3 className="font-bold text-duo-gray-900">
-                                                {quiz.title[language] || quiz.title.id}
-                                            </h3>
-                                            <div className="flex items-center gap-2 text-sm text-duo-gray-500">
-                                                <span>{quiz.questionCount} {language === 'id' ? 'soal' : 'questions'}</span>
-                                                <span>•</span>
-                                                <span className={`badge ${quiz.difficulty === 'easy' ? 'bg-duo-green/20 text-duo-green' :
-                                                    quiz.difficulty === 'medium' ? 'bg-duo-yellow/20 text-duo-yellow-dark' :
-                                                        'bg-duo-red/20 text-duo-red'
-                                                    }`}>
-                                                    {quiz.difficulty.toUpperCase()}
-                                                </span>
-                                                <span>•</span>
-                                                <span>+{quiz.xpReward} XP</span>
+                        {quizzes.length === 0 ? (
+                            <div className="card text-center py-12">
+                                <p className="text-4xl mb-4">📭</p>
+                                <p className="text-duo-gray-500">
+                                    {language === 'id' ? 'Belum ada kuis tersedia.' : 'No quizzes available.'}
+                                </p>
+                            </div>
+                        ) : (
+                            quizzes.map(quiz => {
+                                const completed = isQuizCompleted(quiz.id);
+                                return (
+                                    <div
+                                        key={quiz.id}
+                                        className={`card card-interactive ${quiz.isExamMode ? 'border-2 border-duo-red/30 bg-duo-red/5' : ''}`}
+                                        onClick={() => handleStartQuiz(quiz.id)}
+                                    >
+                                        <div className="flex items-center gap-4">
+                                            <div className="text-4xl">{quiz.icon}</div>
+                                            <div className="flex-1">
+                                                <h3 className="font-bold text-duo-gray-900">
+                                                    {quiz.title}
+                                                </h3>
+                                                <div className="flex items-center gap-2 text-sm text-duo-gray-500">
+                                                    <span>{quiz.questionCount} {language === 'id' ? 'soal' : 'questions'}</span>
+                                                    <span>•</span>
+                                                    <span className={`badge ${quiz.difficulty === 'easy' ? 'bg-duo-green/20 text-duo-green' :
+                                                        quiz.difficulty === 'medium' ? 'bg-duo-yellow/20 text-duo-yellow-dark' :
+                                                            'bg-duo-red/20 text-duo-red'
+                                                        }`}>
+                                                        {quiz.difficulty.toUpperCase()}
+                                                    </span>
+                                                    <span>•</span>
+                                                    <span>+{quiz.xpReward} XP</span>
+                                                </div>
+                                                {quiz.isExamMode && (
+                                                    <p className="text-xs text-duo-red mt-1 font-semibold">
+                                                        🔒 {language === 'id' ? 'Mode Ujian - AI Terkunci' : 'Exam Mode - AI Locked'}
+                                                        {quiz.timeLimit && ` • ${quiz.timeLimit} ${language === 'id' ? 'menit' : 'min'}`}
+                                                    </p>
+                                                )}
                                             </div>
-                                            {quiz.isExamMode && (
-                                                <p className="text-xs text-duo-red mt-1 font-semibold">
-                                                    🔒 {language === 'id' ? 'Mode Ujian - AI Terkunci' : 'Exam Mode - AI Locked'}
-                                                    {quiz.timeLimit && ` • ${quiz.timeLimit} ${language === 'id' ? 'menit' : 'min'}`}
-                                                </p>
+                                            {completed ? (
+                                                <span className="text-2xl">✅</span>
+                                            ) : (
+                                                <span className="text-duo-blue text-xl">→</span>
                                             )}
                                         </div>
-                                        {completed ? (
-                                            <span className="text-2xl">✅</span>
-                                        ) : (
-                                            <span className="text-duo-blue text-xl">→</span>
-                                        )}
                                     </div>
-                                </div>
-                            );
-                        })}
+                                );
+                            })
+                        )}
                     </div>
                 </main>
 
@@ -474,7 +356,7 @@ export default function PracticePage() {
                     <div className="text-6xl mb-4">{rating}</div>
                     <h1 className="text-2xl font-extrabold text-duo-gray-900 mb-2">{message}</h1>
                     <p className="text-duo-gray-500 mb-6">
-                        {activeQuizData?.title[language] || activeQuizData?.title.id}
+                        {activeQuizData?.title}
                     </p>
 
                     <div className="grid grid-cols-2 gap-4 my-6">
@@ -559,7 +441,7 @@ export default function PracticePage() {
                 {/* Multiple Choice Options */}
                 {currentQ.type === 'choice' && currentQ.options && (
                     <div className="space-y-3 mb-6">
-                        {currentQ.options.map((option, index) => (
+                        {currentQ.options.map((option: string, index: number) => (
                             <button
                                 key={index}
                                 onClick={() => handleSelectAnswer(option)}

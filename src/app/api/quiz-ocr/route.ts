@@ -96,7 +96,7 @@ export async function POST(req: NextRequest) {
         const data = matches[2];
 
         const model = genAI.getGenerativeModel({
-            model: 'gemini-1.5-flash',
+            model: 'gemini-2.0-flash-001',
             generationConfig: {
                 temperature: 0.7,
                 maxOutputTokens: 4096,

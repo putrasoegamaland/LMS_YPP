@@ -4,67 +4,44 @@ import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
-
-// Types
-interface Quiz {
-    id: string;
-    title: string;
-    subject: string;
-    questionCount: number;
-    isExamMode: boolean;
-    createdAt: string;
-}
-
-interface ClassInfo {
-    id: string;
-    name: string;
-    studentCount: number;
-}
-
-interface Assignment {
-    id: string;
-    quizId: string;
-    quizTitle: string;
-    classId: string;
-    className: string;
-    dueDate: string;
-    status: 'active' | 'completed' | 'draft';
-    submissionCount: number;
-    totalStudents: number;
-    createdAt: string;
-}
-
-// Mock data
-const MOCK_QUIZZES: Quiz[] = [
-    { id: 'q1', title: 'Kuis Aljabar Bab 1', subject: 'Matematika', questionCount: 10, isExamMode: false, createdAt: '2026-01-10' },
-    { id: 'q2', title: 'UTS Matematika', subject: 'Matematika', questionCount: 25, isExamMode: true, createdAt: '2026-01-08' },
-    { id: 'q3', title: 'Latihan IPA: Sistem Pencernaan', subject: 'IPA', questionCount: 15, isExamMode: false, createdAt: '2026-01-07' },
-    { id: 'q4', title: 'Kuis Farmasi Dasar', subject: 'Farmasi', questionCount: 12, isExamMode: false, createdAt: '2026-01-12' },
-];
-
-const MOCK_CLASSES: ClassInfo[] = [
-    { id: 'c1', name: 'Kelas 9A', studentCount: 32 },
-    { id: 'c2', name: 'Kelas 9B', studentCount: 30 },
-    { id: 'c3', name: 'Kelas 10 IPA 1', studentCount: 28 },
-];
-
-const MOCK_ASSIGNMENTS: Assignment[] = [
-    { id: 'a1', quizId: 'q1', quizTitle: 'Kuis Aljabar Bab 1', classId: 'c1', className: 'Kelas 9A', dueDate: '2026-01-15', status: 'active', submissionCount: 18, totalStudents: 32, createdAt: '2026-01-10' },
-    { id: 'a2', quizId: 'q2', quizTitle: 'UTS Matematika', classId: 'c1', className: 'Kelas 9A', dueDate: '2026-01-20', status: 'active', submissionCount: 5, totalStudents: 32, createdAt: '2026-01-12' },
-    { id: 'a3', quizId: 'q3', quizTitle: 'Latihan IPA: Sistem Pencernaan', classId: 'c2', className: 'Kelas 9B', dueDate: '2026-01-14', status: 'completed', submissionCount: 30, totalStudents: 30, createdAt: '2026-01-07' },
-];
+import { quizService, classService, assignmentService, AssignmentData, QuizData, ClassData } from '@/lib/db';
 
 export default function TeacherAssignmentPage() {
     const router = useRouter();
     const { user, isTeacher, isLoading: authLoading } = useAuth();
     const { language } = useLanguage();
 
-    const [assignments, setAssignments] = useState<Assignment[]>(MOCK_ASSIGNMENTS);
+    const [assignments, setAssignments] = useState<AssignmentData[]>([]);
+    const [quizzes, setQuizzes] = useState<QuizData[]>([]);
+    const [classes, setClasses] = useState<ClassData[]>([]);
+    const [loading, setLoading] = useState(true);
+
     const [isCreateModalOpen, setIsCreateModalOpen] = useState(false);
     const [selectedQuiz, setSelectedQuiz] = useState<string>('');
     const [selectedClass, setSelectedClass] = useState<string>('');
     const [dueDate, setDueDate] = useState<string>('');
     const [filterStatus, setFilterStatus] = useState<'all' | 'active' | 'completed'>('all');
+
+    // Fetch data
+    useEffect(() => {
+        const fetchData = async () => {
+            try {
+                const [quizData, classData, assignmentData] = await Promise.all([
+                    quizService.getAll(user?.id),
+                    classService.getAll(user?.id),
+                    user?.id ? assignmentService.getByTeacher(user.id) : assignmentService.getAll()
+                ]);
+                setQuizzes(quizData);
+                setClasses(classData);
+                setAssignments(assignmentData);
+            } catch (err) {
+                console.error('Failed to fetch data:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        if (user) fetchData();
+    }, [user]);
 
     // Redirect if not teacher
     useEffect(() => {
@@ -73,7 +50,7 @@ export default function TeacherAssignmentPage() {
         }
     }, [user, isTeacher, authLoading, router]);
 
-    if (authLoading || !user) {
+    if (authLoading || !user || loading) {
         return (
             <div className="min-h-screen flex items-center justify-center">
                 <div className="spinner"></div>
@@ -81,19 +58,19 @@ export default function TeacherAssignmentPage() {
         );
     }
 
-    const handleCreateAssignment = () => {
+    const handleCreateAssignment = async () => {
         if (!selectedQuiz || !selectedClass || !dueDate) {
             alert(language === 'id' ? 'Lengkapi semua field!' : 'Please fill all fields!');
             return;
         }
 
-        const quiz = MOCK_QUIZZES.find(q => q.id === selectedQuiz);
-        const classInfo = MOCK_CLASSES.find(c => c.id === selectedClass);
+        const quiz = quizzes.find(q => q.id === selectedQuiz);
+        const classInfo = classes.find(c => c.id === selectedClass);
 
         if (!quiz || !classInfo) return;
 
-        const newAssignment: Assignment = {
-            id: `a-${Date.now()}`,
+        const newAssignment: AssignmentData = {
+            id: `assignment-${Date.now()}`,
             quizId: selectedQuiz,
             quizTitle: quiz.title,
             classId: selectedClass,
@@ -101,15 +78,24 @@ export default function TeacherAssignmentPage() {
             dueDate,
             status: 'active',
             submissionCount: 0,
-            totalStudents: classInfo.studentCount,
+            totalStudents: classInfo.studentIds?.length || 0,
+            createdBy: user.id,
             createdAt: new Date().toISOString().split('T')[0],
         };
 
+        await assignmentService.create(newAssignment);
         setAssignments([newAssignment, ...assignments]);
         setIsCreateModalOpen(false);
         setSelectedQuiz('');
         setSelectedClass('');
         setDueDate('');
+    };
+
+    const handleCompleteAssignment = async (id: string) => {
+        await assignmentService.update(id, { status: 'completed' });
+        setAssignments(prev => prev.map(a =>
+            a.id === id ? { ...a, status: 'completed' } : a
+        ));
     };
 
     const filteredAssignments = assignments.filter(a =>
@@ -181,8 +167,8 @@ export default function TeacherAssignmentPage() {
                             key={status}
                             onClick={() => setFilterStatus(status)}
                             className={`px-4 py-2 rounded-lg font-semibold text-sm transition-all ${filterStatus === status
-                                    ? 'bg-duo-blue text-white'
-                                    : 'bg-white text-duo-gray-600 hover:bg-duo-gray-100'
+                                ? 'bg-duo-blue text-white'
+                                : 'bg-white text-duo-gray-600 hover:bg-duo-gray-100'
                                 }`}
                         >
                             {status === 'all' ? (language === 'id' ? 'Semua' : 'All') :
@@ -241,11 +227,7 @@ export default function TeacherAssignmentPage() {
                                         </button>
                                         {assignment.status === 'active' && (
                                             <button
-                                                onClick={() => {
-                                                    setAssignments(prev => prev.map(a =>
-                                                        a.id === assignment.id ? { ...a, status: 'completed' } : a
-                                                    ));
-                                                }}
+                                                onClick={() => handleCompleteAssignment(assignment.id)}
                                                 className="btn btn-ghost btn-sm text-duo-green"
                                             >
                                                 ✅
@@ -284,9 +266,9 @@ export default function TeacherAssignmentPage() {
                                     className="input"
                                 >
                                     <option value="">{language === 'id' ? '-- Pilih kuis --' : '-- Select quiz --'}</option>
-                                    {MOCK_QUIZZES.map(quiz => (
+                                    {quizzes.map(quiz => (
                                         <option key={quiz.id} value={quiz.id}>
-                                            {quiz.title} ({quiz.questionCount} soal)
+                                            {quiz.title} ({quiz.questions.length} soal)
                                         </option>
                                     ))}
                                 </select>
@@ -303,9 +285,9 @@ export default function TeacherAssignmentPage() {
                                     className="input"
                                 >
                                     <option value="">{language === 'id' ? '-- Pilih kelas --' : '-- Select class --'}</option>
-                                    {MOCK_CLASSES.map(cls => (
+                                    {classes.map(cls => (
                                         <option key={cls.id} value={cls.id}>
-                                            {cls.name} ({cls.studentCount} siswa)
+                                            {cls.name} ({cls.studentIds?.length || 0} siswa)
                                         </option>
                                     ))}
                                 </select>

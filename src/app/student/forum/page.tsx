@@ -1,10 +1,11 @@
 'use client';
 
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect } from 'react';
 import { useRouter } from 'next/navigation';
 import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useGame } from '@/contexts/GameContext';
+import { forumService, ForumPostData, ForumReplyData } from '@/lib/db';
 
 // Discussion types
 interface Post {
@@ -44,94 +45,6 @@ const TOPICS = [
     { id: 'general', name: { id: 'Umum', en: 'General' }, icon: '🗣️' },
 ];
 
-const MOCK_POSTS: Post[] = [
-    {
-        id: 'p1',
-        authorId: 'u1',
-        authorName: 'Guru Matematika',
-        authorAvatar: '👩‍🏫',
-        authorRole: 'teacher',
-        content: '📌 Selamat datang di Forum Diskusi! Silakan bertanya atau berbagi tips belajar di sini. Ingat untuk menjaga sopan santun ya! 🙏',
-        topic: 'general',
-        createdAt: '2026-01-10T08:00:00',
-        likes: 15,
-        replies: [],
-        isLiked: true,
-        isPinned: true,
-        isModerated: false,
-    },
-    {
-        id: 'p2',
-        authorId: 'u2',
-        authorName: 'Budi Santoso',
-        authorAvatar: '👦',
-        authorRole: 'student',
-        content: 'Ada yang bisa bantu jelaskan cara menghitung luas trapesium? Saya masih bingung dengan rumusnya 🤔',
-        topic: 'matematika',
-        createdAt: '2026-01-13T10:30:00',
-        likes: 3,
-        replies: [
-            {
-                id: 'r1',
-                authorId: 'u3',
-                authorName: 'Siti Aminah',
-                authorAvatar: '👧',
-                authorRole: 'student',
-                content: 'Rumusnya: L = ½ × (a + b) × t\nDimana a dan b adalah sisi sejajar, t adalah tinggi',
-                createdAt: '2026-01-13T11:00:00',
-                likes: 5,
-                isLiked: true,
-                isBestAnswer: true,
-            },
-            {
-                id: 'r2',
-                authorId: 'u1',
-                authorName: 'Guru Matematika',
-                authorAvatar: '👩‍🏫',
-                authorRole: 'teacher',
-                content: 'Betul sekali Siti! Penjelasan yang bagus 👏',
-                createdAt: '2026-01-13T11:30:00',
-                likes: 2,
-                isLiked: false,
-                isBestAnswer: false,
-            },
-        ],
-        isLiked: false,
-        isPinned: false,
-        isModerated: false,
-    },
-    {
-        id: 'p3',
-        authorId: 'u4',
-        authorName: 'Andi Pratama',
-        authorAvatar: '👦',
-        authorRole: 'student',
-        content: 'Tips belajar untuk menghadapi UTS minggu depan? Bagi dong strateginya! 📖✨',
-        topic: 'general',
-        createdAt: '2026-01-13T09:00:00',
-        likes: 8,
-        replies: [
-            {
-                id: 'r3',
-                authorId: 'u5',
-                authorName: 'Dewi Kartika',
-                authorAvatar: '👧',
-                authorRole: 'student',
-                content: 'Saya biasanya bikin mind map untuk setiap bab, membantu banget!',
-                createdAt: '2026-01-13T09:30:00',
-                likes: 4,
-                isLiked: false,
-                isBestAnswer: false,
-            },
-        ],
-        isLiked: true,
-        isPinned: false,
-        isModerated: false,
-    },
-];
-
-const STORAGE_KEY = 'lms_ypp_forum_posts';
-
 // Simple AI moderation check (in production, use actual AI)
 const checkModeration = (text: string): { safe: boolean; reason?: string } => {
     const badWords = ['bodoh', 'goblok', 'bego', 'stupid', 'idiot'];
@@ -144,13 +57,42 @@ const checkModeration = (text: string): { safe: boolean; reason?: string } => {
     return { safe: true };
 };
 
+// Map ForumPostData to local Post type
+const mapToPost = (data: ForumPostData, userId?: string): Post => ({
+    id: data.id,
+    authorId: data.authorId,
+    authorName: data.authorName,
+    authorAvatar: data.authorAvatar,
+    authorRole: data.authorRole,
+    content: data.content,
+    topic: data.topic,
+    createdAt: data.createdAt,
+    likes: data.likes,
+    replies: data.replies.map(r => ({
+        id: r.id,
+        authorId: r.authorId,
+        authorName: r.authorName,
+        authorAvatar: r.authorAvatar,
+        authorRole: r.authorRole,
+        content: r.content,
+        createdAt: r.createdAt,
+        likes: r.likes,
+        isLiked: r.likedBy?.includes(userId || '') || false,
+        isBestAnswer: r.isBestAnswer,
+    })),
+    isLiked: data.likedBy?.includes(userId || '') || false,
+    isPinned: data.isPinned,
+    isModerated: false,
+});
+
 export default function DiscussionPage() {
     const router = useRouter();
     const { user, isLoading: authLoading, isTeacher } = useAuth();
     const { language } = useLanguage();
     const { addXp } = useGame();
 
-    const [posts, setPosts] = useState<Post[]>(MOCK_POSTS);
+    const [posts, setPosts] = useState<Post[]>([]);
+    const [loading, setLoading] = useState(true);
     const [selectedTopic, setSelectedTopic] = useState('all');
     const [newPost, setNewPost] = useState('');
     const [newPostTopic, setNewPostTopic] = useState('general');
@@ -158,7 +100,22 @@ export default function DiscussionPage() {
     const [replyContent, setReplyContent] = useState('');
     const [moderationWarning, setModerationWarning] = useState<string | null>(null);
 
-    if (authLoading || !user) {
+    // Fetch posts from forumService
+    useEffect(() => {
+        const fetchPosts = async () => {
+            try {
+                const data = await forumService.getAll();
+                setPosts(data.map(p => mapToPost(p, user?.id)));
+            } catch (err) {
+                console.error('Failed to fetch posts:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchPosts();
+    }, [user?.id]);
+
+    if (authLoading || !user || loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-duo-gray-100">
                 <div className="spinner"></div>
@@ -176,7 +133,7 @@ export default function DiscussionPage() {
         return new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime();
     });
 
-    const handleCreatePost = () => {
+    const handleCreatePost = async () => {
         if (!newPost.trim()) return;
 
         // AI moderation check
@@ -186,7 +143,7 @@ export default function DiscussionPage() {
             return;
         }
 
-        const post: Post = {
+        const postData: ForumPostData = {
             id: `p-${Date.now()}`,
             authorId: user.id || 'current-user',
             authorName: user.name || 'Kamu',
@@ -196,18 +153,18 @@ export default function DiscussionPage() {
             topic: newPostTopic,
             createdAt: new Date().toISOString(),
             likes: 0,
+            likedBy: [],
             replies: [],
-            isLiked: false,
             isPinned: false,
-            isModerated: false,
         };
 
-        setPosts([post, ...posts]);
+        await forumService.create(postData);
+        setPosts([mapToPost(postData, user.id), ...posts]);
         setNewPost('');
         addXp(10); // XP for posting
     };
 
-    const handleReply = (postId: string) => {
+    const handleReply = async (postId: string) => {
         if (!replyContent.trim()) return;
 
         // AI moderation check
@@ -217,7 +174,7 @@ export default function DiscussionPage() {
             return;
         }
 
-        const reply: Reply = {
+        const replyData: ForumReplyData = {
             id: `r-${Date.now()}`,
             authorId: user.id || 'current-user',
             authorName: user.name || 'Kamu',
@@ -226,8 +183,15 @@ export default function DiscussionPage() {
             content: replyContent,
             createdAt: new Date().toISOString(),
             likes: 0,
-            isLiked: false,
+            likedBy: [],
             isBestAnswer: false,
+        };
+
+        await forumService.addReply(postId, replyData);
+
+        const reply: Reply = {
+            ...replyData,
+            isLiked: false,
         };
 
         setPosts(posts.map(p =>
@@ -239,7 +203,8 @@ export default function DiscussionPage() {
         addXp(5); // XP for replying
     };
 
-    const handleLikePost = (postId: string) => {
+    const handleLikePost = async (postId: string) => {
+        await forumService.toggleLike(postId, user.id || '');
         setPosts(posts.map(p =>
             p.id === postId
                 ? { ...p, isLiked: !p.isLiked, likes: p.isLiked ? p.likes - 1 : p.likes + 1 }
@@ -300,8 +265,8 @@ export default function DiscussionPage() {
                             key={topic.id}
                             onClick={() => setSelectedTopic(topic.id)}
                             className={`px-4 py-2 rounded-lg font-semibold transition-all ${selectedTopic === topic.id
-                                    ? 'bg-duo-blue text-white'
-                                    : 'bg-white text-duo-gray-600 hover:bg-duo-gray-100'
+                                ? 'bg-duo-blue text-white'
+                                : 'bg-white text-duo-gray-600 hover:bg-duo-gray-100'
                                 }`}
                         >
                             {topic.icon} {language === 'id' ? topic.name.id : topic.name.en}

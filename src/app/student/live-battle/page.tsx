@@ -222,10 +222,25 @@ export default function LiveBattlePage() {
     if (phase === 'waiting') {
         const allReady = participants.length >= 2 && participants.every(p => p.isReady);
 
+        const handleLeaveRoom = () => {
+            setPhase('join');
+            setRoomId('');
+            setRoomCode('');
+            setIsHost(false);
+        };
+
         return (
             <div className="min-h-screen bg-gradient-to-br from-indigo-900 via-purple-900 to-pink-900 p-6">
                 <div className="max-w-2xl mx-auto">
                     <div className="bg-white/10 backdrop-blur-xl rounded-3xl p-8 text-white text-center">
+                        {/* Back Button */}
+                        <button
+                            onClick={handleLeaveRoom}
+                            className="absolute top-4 left-4 text-white/70 hover:text-white flex items-center gap-2"
+                        >
+                            ← {language === 'id' ? 'Keluar Room' : 'Leave Room'}
+                        </button>
+
                         <h2 className="text-2xl font-bold mb-2">
                             🎮 {language === 'id' ? 'Ruang Tunggu' : 'Waiting Room'}
                         </h2>

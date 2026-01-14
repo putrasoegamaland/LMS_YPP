@@ -6,24 +6,26 @@ import { useAuth } from '@/contexts/AuthContext';
 import { useLanguage } from '@/contexts/LanguageContext';
 import { useGame } from '@/contexts/GameContext';
 
-// Demo leaderboard data
-const DEMO_LEADERBOARD = [
-    { rank: 1, userId: 'user-1', userName: 'Andi Pratama', avatar: '🦁', xp: 2450, streak: 15, change: 0 },
-    { rank: 2, userId: 'user-2', userName: 'Siti Nurhaliza', avatar: '🦊', xp: 2320, streak: 12, change: 2 },
-    { rank: 3, userId: 'user-3', userName: 'Budi Santoso', avatar: '🐼', xp: 2180, streak: 8, change: -1 },
-    { rank: 4, userId: 'user-4', userName: 'Dewi Lestari', avatar: '🐰', xp: 1950, streak: 10, change: 1 },
-    { rank: 5, userId: 'user-5', userName: 'Rizki Ramadhan', avatar: '🐻', xp: 1820, streak: 5, change: -2 },
-    { rank: 6, userId: 'user-6', userName: 'Putri Handayani', avatar: '🦋', xp: 1750, streak: 7, change: 0 },
-    { rank: 7, userId: 'user-7', userName: 'Ahmad Fauzi', avatar: '🦅', xp: 1680, streak: 4, change: 3 },
-    { rank: 8, userId: 'student-1', userName: 'Budi Santoso', avatar: '🦊', xp: 0, streak: 0, change: 0 }, // Current user placeholder
-];
+import { studentService, classService, ClassData, StudentData } from '@/lib/db';
 
-const CLASS_LEADERBOARD = [
-    { rank: 1, classId: 'class-1', className: 'Kelas 9A', avgXp: 1850, studentCount: 32, topStudent: 'Andi P.' },
-    { rank: 2, classId: 'class-2', className: 'Kelas 9B', avgXp: 1720, studentCount: 30, topStudent: 'Siti N.' },
-    { rank: 3, classId: 'class-3', className: 'Kelas 9C', avgXp: 1650, studentCount: 28, topStudent: 'Dewi L.' },
-    { rank: 4, classId: 'class-4', className: 'Kelas 10A', avgXp: 1580, studentCount: 30, topStudent: 'Rizki R.' },
-];
+type LeaderboardEntry = {
+    rank: number;
+    userId: string;
+    userName: string;
+    avatar: string;
+    xp: number;
+    streak: number;
+    change: number;
+};
+
+type ClassLeaderboardEntry = {
+    rank: number;
+    classId: string;
+    className: string;
+    avgXp: number;
+    studentCount: number;
+    topStudent: string;
+};
 
 const SKILL_LEADERBOARD = {
     matematika: [
@@ -44,9 +46,12 @@ export default function CompetePage() {
     const router = useRouter();
     const { user, isStudent, isLoading: authLoading } = useAuth();
     const { language, t } = useLanguage();
-    const { xp, streak, level } = useGame();
+    const { xp, streak } = useGame();
 
     const [activeTab, setActiveTab] = useState<LeaderboardType>('individual');
+    const [leaderboard, setLeaderboard] = useState<LeaderboardEntry[]>([]);
+    const [classLeaderboard, setClassLeaderboard] = useState<ClassLeaderboardEntry[]>([]);
+    const [loading, setLoading] = useState(true);
 
     // Redirect if not student
     useEffect(() => {
@@ -55,7 +60,58 @@ export default function CompetePage() {
         }
     }, [isStudent, authLoading, router]);
 
-    if (authLoading || !isStudent) {
+    // Fetch leaderboard data
+    useEffect(() => {
+        const fetchLeaderboard = async () => {
+            try {
+                // Individual leaderboard
+                const students = await studentService.getLeaderboard(50);
+                const mapped: LeaderboardEntry[] = students.map((s, index) => ({
+                    rank: index + 1,
+                    userId: s.id,
+                    userName: s.name,
+                    avatar: s.avatar,
+                    xp: s.xp,
+                    streak: s.streak,
+                    change: 0
+                }));
+                setLeaderboard(mapped);
+
+                // Class leaderboard - calculate average XP per class
+                const allClasses = await classService.getAll();
+                const allStudents = await studentService.getAll();
+
+                const classStats: ClassLeaderboardEntry[] = allClasses.map(cls => {
+                    const classStudents = allStudents.filter(s => s.classIds?.includes(cls.id));
+                    const totalXp = classStudents.reduce((sum, s) => sum + s.xp, 0);
+                    const avgXp = classStudents.length > 0 ? Math.round(totalXp / classStudents.length) : 0;
+                    const topStudent = classStudents.sort((a, b) => b.xp - a.xp)[0];
+
+                    return {
+                        rank: 0,
+                        classId: cls.id,
+                        className: cls.name,
+                        avgXp,
+                        studentCount: classStudents.length,
+                        topStudent: topStudent?.name || '-'
+                    };
+                });
+
+                // Sort by avgXp and assign ranks
+                classStats.sort((a, b) => b.avgXp - a.avgXp);
+                classStats.forEach((c, i) => c.rank = i + 1);
+                setClassLeaderboard(classStats);
+
+            } catch (err) {
+                console.error('Failed to fetch leaderboard:', err);
+            } finally {
+                setLoading(false);
+            }
+        };
+        fetchLeaderboard();
+    }, [xp]); // Re-fetch when my XP changes
+
+    if (authLoading || !isStudent || loading) {
         return (
             <div className="min-h-screen flex items-center justify-center bg-duo-gray-100">
                 <div className="spinner"></div>
@@ -63,14 +119,7 @@ export default function CompetePage() {
         );
     }
 
-    // Update current user's data in leaderboard
-    const leaderboard = DEMO_LEADERBOARD.map(entry =>
-        entry.userId === 'student-1'
-            ? { ...entry, userName: user?.name || 'You', xp, streak }
-            : entry
-    ).sort((a, b) => b.xp - a.xp).map((entry, index) => ({ ...entry, rank: index + 1 }));
-
-    const currentUserRank = leaderboard.find(e => e.userId === 'student-1')?.rank || 0;
+    const currentUserRank = leaderboard.find(e => e.userId === user?.id)?.rank || '-';
 
     return (
         <div className="min-h-screen bg-duo-gray-100 pb-24">
@@ -198,31 +247,40 @@ export default function CompetePage() {
                         <h2 className="font-bold text-duo-gray-900 mb-4">
                             {language === 'id' ? '🏫 Peringkat Kelas' : '🏫 Class Rankings'}
                         </h2>
-                        {CLASS_LEADERBOARD.map((entry) => (
-                            <div
-                                key={entry.classId}
-                                className={`leaderboard-item ${entry.classId === 'class-1' ? 'current-user' : ''}`}
-                            >
-                                <div className={`rank-badge ${entry.rank === 1 ? 'rank-1' : entry.rank === 2 ? 'rank-2' : entry.rank === 3 ? 'rank-3' : 'bg-duo-gray-200 text-duo-gray-700'
-                                    }`}>
-                                    {entry.rank <= 3 ? ['🥇', '🥈', '🥉'][entry.rank - 1] : entry.rank}
-                                </div>
-                                <div className="text-2xl">🏫</div>
-                                <div className="flex-1">
-                                    <p className="font-bold text-duo-gray-900">
-                                        {entry.className}
-                                        {entry.classId === 'class-1' && user?.classId === 'class-1' && (
-                                            <span className="text-duo-blue ml-2 text-sm">({language === 'id' ? 'Kelasmu' : 'Your Class'})</span>
-                                        )}
-                                    </p>
-                                    <p className="text-sm text-duo-gray-500">👨‍🎓 {entry.studentCount} • ⭐ {entry.topStudent}</p>
-                                </div>
-                                <div className="text-right">
-                                    <p className="font-bold text-duo-purple">{entry.avgXp}</p>
-                                    <p className="text-xs text-duo-gray-500">{language === 'id' ? 'Rata-rata XP' : 'Avg XP'}</p>
-                                </div>
+                        {classLeaderboard.length === 0 ? (
+                            <div className="card text-center py-8">
+                                <p className="text-4xl mb-4">📭</p>
+                                <p className="text-duo-gray-500">
+                                    {language === 'id' ? 'Belum ada data kelas' : 'No class data yet'}
+                                </p>
                             </div>
-                        ))}
+                        ) : (
+                            classLeaderboard.map((entry) => (
+                                <div
+                                    key={entry.classId}
+                                    className={`leaderboard-item ${user?.classId === entry.classId ? 'current-user' : ''}`}
+                                >
+                                    <div className={`rank-badge ${entry.rank === 1 ? 'rank-1' : entry.rank === 2 ? 'rank-2' : entry.rank === 3 ? 'rank-3' : 'bg-duo-gray-200 text-duo-gray-700'
+                                        }`}>
+                                        {entry.rank <= 3 ? ['🥇', '🥈', '🥉'][entry.rank - 1] : entry.rank}
+                                    </div>
+                                    <div className="text-2xl">🏫</div>
+                                    <div className="flex-1">
+                                        <p className="font-bold text-duo-gray-900">
+                                            {entry.className}
+                                            {user?.classId === entry.classId && (
+                                                <span className="text-duo-blue ml-2 text-sm">({language === 'id' ? 'Kelasmu' : 'Your Class'})</span>
+                                            )}
+                                        </p>
+                                        <p className="text-sm text-duo-gray-500">👨‍🎓 {entry.studentCount} • ⭐ {entry.topStudent}</p>
+                                    </div>
+                                    <div className="text-right">
+                                        <p className="font-bold text-duo-purple">{entry.avgXp}</p>
+                                        <p className="text-xs text-duo-gray-500">{language === 'id' ? 'Rata-rata XP' : 'Avg XP'}</p>
+                                    </div>
+                                </div>
+                            ))
+                        )}
                     </div>
                 )}
 
@@ -334,8 +392,8 @@ function TabButton({ active, onClick, emoji, label }: { active: boolean; onClick
         <button
             onClick={onClick}
             className={`px-4 py-2 rounded-full font-semibold text-sm whitespace-nowrap transition-all ${active
-                    ? 'bg-duo-purple text-white'
-                    : 'bg-duo-gray-100 text-duo-gray-600 hover:bg-duo-gray-200'
+                ? 'bg-duo-purple text-white'
+                : 'bg-duo-gray-100 text-duo-gray-600 hover:bg-duo-gray-200'
                 }`}
         >
             {emoji} {label}

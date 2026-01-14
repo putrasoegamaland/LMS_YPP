@@ -744,5 +744,88 @@ export const studentService = {
         const filtered = all.filter(s => s.id !== id);
         localStorage.setItem(STUDENT_STORAGE_KEY, JSON.stringify(filtered));
         return true;
+    },
+
+    async getLeaderboard(limit: number = 20): Promise<StudentData[]> {
+        const all = await this.getAll();
+        return all.sort((a, b) => b.xp - a.xp).slice(0, limit);
     }
 };
+
+// ============================================
+// ASSIGNMENTS
+// ============================================
+
+const ASSIGNMENT_STORAGE_KEY = 'lms_ypp_assignments';
+
+export interface AssignmentData {
+    id: string;
+    quizId: string;
+    quizTitle: string;
+    classId: string;
+    className: string;
+    dueDate: string;
+    status: 'active' | 'completed' | 'draft';
+    submissionCount: number;
+    totalStudents: number;
+    createdBy: string;
+    createdAt: string;
+}
+
+export const assignmentService = {
+    async getAll(): Promise<AssignmentData[]> {
+        const data = localStorage.getItem(ASSIGNMENT_STORAGE_KEY);
+        return data ? JSON.parse(data) : [];
+    },
+
+    async getByTeacher(teacherId: string): Promise<AssignmentData[]> {
+        const all = await this.getAll();
+        return all.filter(a => a.createdBy === teacherId);
+    },
+
+    async getByClass(classId: string): Promise<AssignmentData[]> {
+        const all = await this.getAll();
+        return all.filter(a => a.classId === classId);
+    },
+
+    async getActive(): Promise<AssignmentData[]> {
+        const all = await this.getAll();
+        return all.filter(a => a.status === 'active');
+    },
+
+    async create(assignment: AssignmentData): Promise<AssignmentData> {
+        const all = await this.getAll();
+        all.unshift(assignment);
+        localStorage.setItem(ASSIGNMENT_STORAGE_KEY, JSON.stringify(all));
+        return assignment;
+    },
+
+    async update(id: string, updates: Partial<AssignmentData>): Promise<AssignmentData | null> {
+        const all = await this.getAll();
+        const idx = all.findIndex(a => a.id === id);
+        if (idx === -1) return null;
+        all[idx] = { ...all[idx], ...updates };
+        localStorage.setItem(ASSIGNMENT_STORAGE_KEY, JSON.stringify(all));
+        return all[idx];
+    },
+
+    async incrementSubmission(id: string): Promise<boolean> {
+        const all = await this.getAll();
+        const idx = all.findIndex(a => a.id === id);
+        if (idx === -1) return false;
+        all[idx].submissionCount++;
+        if (all[idx].submissionCount >= all[idx].totalStudents) {
+            all[idx].status = 'completed';
+        }
+        localStorage.setItem(ASSIGNMENT_STORAGE_KEY, JSON.stringify(all));
+        return true;
+    },
+
+    async delete(id: string): Promise<boolean> {
+        const all = await this.getAll();
+        const filtered = all.filter(a => a.id !== id);
+        localStorage.setItem(ASSIGNMENT_STORAGE_KEY, JSON.stringify(filtered));
+        return true;
+    }
+};
+
